@@ -2,7 +2,7 @@ from pathlib import Path
 import pandas as pd
 from retrieval.bm25_index import BM25DocumentIndex
 from retrieval.dense_retriever import DenseRetriever, DenseDocumentIndex
-from retrieval.image_retriever import ImageEncoder, ImageEncoderConfig
+from retrieval.image_retriever import ImageEncoder, ImageIndex
 from retrieval.hybrid_search import run_hybrid_pipeline
 from utils.text import normalize_text, tokenize
 
@@ -77,8 +77,7 @@ def build_or_load_dense(df_passages: pd.DataFrame):
 def build_query_image_encoder() -> ImageEncoder:
     """In M2KR images are available ONLY at query level."""
     print("Initializing ImageEncoder for query images")
-    cfg = ImageEncoderConfig()
-    return ImageEncoder(cfg)
+    return ImageEncoder()
 
 
 def main():
@@ -86,7 +85,7 @@ def main():
     bm25_index = build_or_load_bm25(df_passages)
     dense_retriever, dense_index = build_or_load_dense(df_passages)
     # for future
-    # image_encoder = build_query_image_encoder()
+    image_encoder = build_query_image_encoder()
     image_index = None
 
     print("Running hybrid retrieval")
@@ -103,7 +102,7 @@ def main():
         dense_top_k=DENSE_TOP_K,
         final_top_k=FINAL_TOP_K,
         image_index=image_index,
-        image_encoder=None,
+        image_encoder=image_encoder,
         image_alpha=IMAGE_ALPHA,
     )
 

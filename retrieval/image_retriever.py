@@ -23,6 +23,19 @@ class ImageEncoder:
         
         for p in self.model.parameters():
             p.requires_grad_(False)
+
+    @torch.no_grad()
+    def encode_texts(self, texts: List[str]) -> torch.Tensor:
+        inputs = self.processor(text=texts, return_tensors="pt", padding=True).to(self.device)
+
+        outputs = self.model(**inputs)
+
+        if hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
+            embs = outputs.pooler_output
+        else:
+            embs = outputs.last_hidden_state.mean(dim=1)
+
+        return torch.nn.functional.normalize(embs, dim=-1).cpu()
     
     @torch.no_grad()
     def encode_images(self, paths: List[Optional[str]]) -> torch.Tensor:
