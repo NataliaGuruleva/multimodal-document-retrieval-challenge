@@ -1,0 +1,3 @@
+exp_id,submission_file,models,features,weights,score
+01,submission_bm25_bgevl_v01.csv,"BM25 + BGE-VL","text","{bm25: 0.4, dense: 0.6}",22.2158
+02,submission_bm25_bgevl_img_v02.csv,"BM25 + BGE-VL + CLIP","text+image","{bm25: 0.2, dense: 0.4, image: 0.4}",

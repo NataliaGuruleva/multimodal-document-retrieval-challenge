@@ -1,0 +1,18 @@
+# virtual env
+mm_project/
+.venv/
+
+# artifacts
+artifacts/
+data/
+
+# python
+__pycache__/
+*.pyc
+
+# torch / hf
+.cache/
+.cache_huggingface/
+*.pt
+*.npz
+*.pkl
