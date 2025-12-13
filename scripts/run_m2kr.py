@@ -47,7 +47,7 @@ def build_or_load_bm25(df_passages: pd.DataFrame) -> BM25DocumentIndex:
     print("Building BM25 index")
 
     doc_ids = df_passages["passage_id"].astype(str).tolist()
-    texts = (df_passages["passage_content"].fillna("").map(normalize_text).tolist())
+    texts = df_passages["passage_content"].fillna("").map(normalize_text).tolist()
 
     bm25 = BM25DocumentIndex.build(doc_ids=doc_ids, texts=texts, tokenizer=tokenize)
     BM25_INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -68,10 +68,7 @@ def build_or_load_dense(df_passages: pd.DataFrame):
     print("Building Dense index")
 
     doc_ids = df_passages["passage_id"].astype(str).tolist()
-    texts = [
-        normalize_text(row.get("vlm_text") or row.get("ocr_text") or "")
-        for _, row in df_passages.iterrows()
-    ]
+    texts = df_passages["passage_content"].fillna("").map(normalize_text).tolist()
 
     dense_index = dense_retriever.build_index(doc_ids=doc_ids, texts=texts)
     dense_index.save(DENSE_INDEX_PATH)
