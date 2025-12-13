@@ -1,3 +1,8 @@
+from config import SEED
+from utils.seed import set_seed
+
+set_seed(SEED)
+
 from pathlib import Path
 import pandas as pd
 from retrieval.bm25_index import BM25DocumentIndex
@@ -18,8 +23,8 @@ BM25_TOP_K = 200
 DENSE_TOP_K = 100
 FINAL_TOP_K = 5
 
-TEXT_ALPHA = 0.6     # dense-text weight (BM25 + dense)
-IMAGE_ALPHA = 0.3    # image weight
+TEXT_ALPHA = 0.0     # dense-text weight
+IMAGE_ALPHA = 1.0    # image weight
 
 
 def load_m2kr_data():
@@ -84,7 +89,7 @@ def main():
     df_passages, df_queries = load_m2kr_data()
     bm25_index = build_or_load_bm25(df_passages)
     dense_retriever, dense_index = build_or_load_dense(df_passages)
-    # for future
+    # image mode
     image_encoder = build_query_image_encoder()
     image_index = None
 
@@ -104,6 +109,7 @@ def main():
         image_index=image_index,
         image_encoder=image_encoder,
         image_alpha=IMAGE_ALPHA,
+        passages_df=df_passages
     )
 
     print(f"Output saved to: {OUTPUT_PATH}")

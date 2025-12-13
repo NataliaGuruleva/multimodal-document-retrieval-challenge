@@ -21,8 +21,8 @@ except ImportError:
     EMB_BATCH_SIZE = 64
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     DENSE_POOLING = "mean"
-    HYBRID_ALPHA = 0.6 # dense-text
-    HYBRID_BETA = 0.0 # image
+    HYBRID_ALPHA = 0.5 # dense-text
+    HYBRID_BETA = 0.3 # image
 
 
 # sentence-transformers lazy load

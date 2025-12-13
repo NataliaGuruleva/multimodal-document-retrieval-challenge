@@ -22,7 +22,7 @@ def load_image(image_path: Optional[str] = None) -> Optional[Image.Image]:
     try:
         # Try absolute path
         p = Path(image_path)
-        if p.is_absolute() and p.exists():
+        if p.exists():
             return Image.open(p).convert("RGB")
         
         # Try relative to DATA_DIR
