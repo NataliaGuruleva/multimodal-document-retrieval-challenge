@@ -1,29 +1,39 @@
+from config import SEED
+from utils.seed import set_seed
+
+set_seed(SEED)
+
 from pathlib import Path
 import json
 import pandas as pd
+
 from retrieval.bm25_index import BM25DocumentIndex
 from retrieval.dense_retriever import DenseRetriever, DenseDocumentIndex
 from retrieval.image_retriever import ImageEncoder, ImageIndex
 from retrieval.hybrid_search import run_hybrid_pipeline
+from retrieval.vlm_retriever import VLMRetriever
 from utils.text import normalize_text, tokenize
 
 
 # Parameters
 DATA_DIR = Path("data/MMDocIR-Challenge")
 ARTIFACTS_DIR = Path("artifacts")
+
 PASSAGE_FILE = DATA_DIR / "MMDocIR_pages.parquet"
 QUERY_FILE = DATA_DIR / "MMDocIR_gt_remove.jsonl"
+
 BM25_INDEX_PATH = ARTIFACTS_DIR / "bm25/mmdoc_bm25.pkl"
 DENSE_INDEX_PATH = ARTIFACTS_DIR / "embeddings/mmdoc_dense"
 IMAGE_INDEX_PATH = ARTIFACTS_DIR / "embeddings/mmdoc_image.pt"
+
 OUTPUT_PATH = ARTIFACTS_DIR / "submission/submission_mmdoc.jsonl"
 
 # Retrieval parameters
 BM25_TOP_K = 200
 DENSE_TOP_K = 100
 FINAL_TOP_K = 5
-TEXT_ALPHA = 0.6 # dense-text weight
-IMAGE_ALPHA = 0.1 # image
+TEXT_ALPHA = 0.6
+IMAGE_ALPHA = 0.3
 
 
 def load_mmdoc_data():
@@ -40,7 +50,6 @@ def load_mmdoc_data():
 
 
 def build_bm25_index(df_passages: pd.DataFrame) -> BM25DocumentIndex:
-    """Build BM25 index with doc_name restriction support."""
     print("Building BM25 index")
 
     doc_ids = df_passages["passage_id"].astype(str).tolist()
@@ -61,8 +70,8 @@ def build_bm25_index(df_passages: pd.DataFrame) -> BM25DocumentIndex:
 
     BM25_INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
     bm25.save(BM25_INDEX_PATH)
-    print(f"BM25 index saved to {BM25_INDEX_PATH}")
 
+    print(f"BM25 index saved to {BM25_INDEX_PATH}")
     return bm25
 
 
@@ -76,6 +85,7 @@ def build_dense_index(df_passages: pd.DataFrame):
         return dense_retriever, dense_index
 
     print("Building Dense index")
+
     doc_ids = df_passages["passage_id"].astype(str).tolist()
     texts = [
         normalize_text(row.get("vlm_text") or row.get("ocr_text") or "")
@@ -90,9 +100,6 @@ def build_dense_index(df_passages: pd.DataFrame):
 
 
 def build_image_index_if_available(df_passages: pd.DataFrame):
-    """
-    Not used by default
-    """
     if "image_path" not in df_passages.columns:
         return None, None
 
@@ -125,10 +132,14 @@ def build_image_index_if_available(df_passages: pd.DataFrame):
 
 def main():
     df_passages, queries = load_mmdoc_data()
+
     bm25_index = build_bm25_index(df_passages)
     dense_retriever, dense_index = build_dense_index(df_passages)
 
-    # image fusion disabled by default
+    # vlm = VLMRetriever()
+    vlm = None
+
+    # image retrieval disabled
     image_encoder, image_index = None, None
 
     print("Running hybrid retrieval")
@@ -147,6 +158,10 @@ def main():
         image_index=image_index,
         image_encoder=image_encoder,
         image_alpha=IMAGE_ALPHA,
+        vlm_retriever=vlm,
+        passages_df=df_passages,
+        captioner=None,
+        caption_gamma=0.0
     )
 
     print(f"Output saved to: {OUTPUT_PATH}")

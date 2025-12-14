@@ -26,6 +26,19 @@ BM25_TOP_K = 200
 DENSE_TOP_K = 100
 FINAL_TOP_K = 5
 
+# Captioning (M2KR query images)
+CAPTION_MODEL_NAME = "C:/Users/dimaa/blip_model"
+CAPTION_BATCH_SIZE = 8
+CAPTION_MAX_NEW_TOKENS = 32
+CAPTION_NUM_BEAMS = 3
+
+# If True, caption text is appended to query_text for BM25 + dense
+CAPTION_APPEND_TO_QUERY = True
+
+# Text fusion: BM25 + Dense + CaptionDense + Image
+HYBRID_GAMMA = 0.0       # weight of caption-dense branch
+CAPTION_TOP_K = 100
+
 SEED = 42
 torch.manual_seed(SEED)
 if DEVICE == "cuda":

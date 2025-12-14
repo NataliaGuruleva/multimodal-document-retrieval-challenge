@@ -15,14 +15,16 @@ try:
         DENSE_POOLING,
         HYBRID_ALPHA,
         HYBRID_BETA,
+        HYBRID_GAMMA,
     )
 except ImportError:
     DENSE_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
     EMB_BATCH_SIZE = 64
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     DENSE_POOLING = "mean"
-    HYBRID_ALPHA = 0.5 # dense-text
+    HYBRID_ALPHA = 0.1 # dense-text
     HYBRID_BETA = 0.3 # image
+    HYBRID_GAMMA = 0.3
 
 
 # sentence-transformers lazy load
@@ -154,34 +156,63 @@ class DenseRetriever:
         bm25_scores: List[Tuple[str, float]],
         dense_scores: List[Tuple[str, float]],
         image_scores: Optional[List[Tuple[str, float]]] = None,
+        caption_scores: Optional[List[Tuple[str, float]]] = None,
         alpha: float = HYBRID_ALPHA,
         beta: float = HYBRID_BETA,
-        top_k: int = 100,
+        gamma: float = HYBRID_GAMMA,
+        top_k: int = 5,
+        normalize: bool = True,
     ) -> List[Tuple[str, float]]:
         """
         Late fusion:
-            score = (1 - alpha - beta) * bm25
-                  + alpha * dense_text
-                  + beta  * image
-        
-        Все скоры предполагаются нормированными или соизмеримыми.
+            score = w_bm25   * bm25
+                  + alpha    * dense_text
+                  + beta     * image
+                  + gamma    * caption_dense
+            w_bm25 = 1 - alpha - beta - gamma
         """
         assert 0.0 <= alpha <= 1.0
         assert 0.0 <= beta <= 1.0
-        assert alpha + beta <= 1.0
-        
+        assert 0.0 <= gamma <= 1.0
+        assert alpha + beta + gamma <= 1.0
+
+        def minmax(src: Optional[List[Tuple[str, float]]]) -> Optional[List[Tuple[str, float]]]:
+            if not src:
+                return src
+            vals = np.array([float(s) for _, s in src], dtype=np.float32)
+            mn = float(vals.min())
+            mx = float(vals.max())
+            if mx - mn < 1e-12:
+                vals = np.ones_like(vals, dtype=np.float32)
+            else:
+                vals = (vals - mn) / (mx - mn)
+            return [(pid, float(v)) for (pid, _), v in zip(src, vals)]
+
+        if normalize:
+            bm25_scores_n = minmax(bm25_scores)
+            dense_scores_n = minmax(dense_scores)
+            image_scores_n = minmax(image_scores) if image_scores is not None else None
+            caption_scores_n = minmax(caption_scores) if caption_scores is not None else None
+        else:
+            bm25_scores_n = bm25_scores
+            dense_scores_n = dense_scores
+            image_scores_n = image_scores
+            caption_scores_n = caption_scores
+
+        w_bm25 = 1.0 - alpha - beta - gamma
         scores: Dict[str, float] = {}
-        
+
         def add(src: Optional[List[Tuple[str, float]]], weight: float):
             if not src or weight == 0.0:
                 return
             for pid, s in src:
-                scores[pid] = scores.get(pid, 0.0) + weight * s
-        
-        add(bm25_scores, 1.0 - alpha - beta)
-        add(dense_scores, alpha)
-        add(image_scores, beta)
-        
+                scores[pid] = scores.get(pid, 0.0) + weight * float(s)
+
+        add(bm25_scores_n, w_bm25)
+        add(dense_scores_n, alpha)
+        add(image_scores_n, beta)
+        add(caption_scores_n, gamma)
+
         ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
         return ranked[:top_k]
 

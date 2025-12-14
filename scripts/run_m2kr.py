@@ -10,7 +10,17 @@ from retrieval.dense_retriever import DenseRetriever, DenseDocumentIndex
 from retrieval.image_retriever import ImageEncoder, ImageIndex
 from retrieval.hybrid_search import run_hybrid_pipeline
 from utils.text import normalize_text, tokenize
-
+from utils.text import clean_m2kr_passage_content
+from retrieval.captioner import ImageCaptioner
+from config import (
+    CAPTION_MODEL_NAME,
+    CAPTION_BATCH_SIZE,
+    CAPTION_MAX_NEW_TOKENS,
+    CAPTION_NUM_BEAMS,
+    CAPTION_APPEND_TO_QUERY,
+    HYBRID_GAMMA,
+    CAPTION_TOP_K,
+)
 
 DATA_DIR = Path("data/M2KR-Challenge")
 ARTIFACTS_DIR = Path("artifacts")
@@ -23,8 +33,8 @@ BM25_TOP_K = 200
 DENSE_TOP_K = 100
 FINAL_TOP_K = 5
 
-TEXT_ALPHA = 0.0     # dense-text weight
-IMAGE_ALPHA = 1.0    # image weight
+TEXT_ALPHA = 0.5     # dense-text weight
+IMAGE_ALPHA = 0.3    # image weight
 
 
 def load_m2kr_data():
@@ -47,7 +57,7 @@ def build_or_load_bm25(df_passages: pd.DataFrame) -> BM25DocumentIndex:
     print("Building BM25 index")
 
     doc_ids = df_passages["passage_id"].astype(str).tolist()
-    texts = df_passages["passage_content"].fillna("").map(normalize_text).tolist()
+    texts = df_passages["passage_content"].fillna("").map(clean_m2kr_passage_content).tolist()
 
     bm25 = BM25DocumentIndex.build(doc_ids=doc_ids, texts=texts, tokenizer=tokenize)
     BM25_INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -68,8 +78,7 @@ def build_or_load_dense(df_passages: pd.DataFrame):
     print("Building Dense index")
 
     doc_ids = df_passages["passage_id"].astype(str).tolist()
-    texts = df_passages["passage_content"].fillna("").map(normalize_text).tolist()
-
+    texts = df_passages["passage_content"].fillna("").map(clean_m2kr_passage_content).tolist()
     dense_index = dense_retriever.build_index(doc_ids=doc_ids, texts=texts)
     dense_index.save(DENSE_INDEX_PATH)
     print(f"Dense index saved to {DENSE_INDEX_PATH}")
@@ -89,7 +98,13 @@ def main():
     # image mode
     image_encoder = build_query_image_encoder()
     image_index = None
-
+    captioner = ImageCaptioner(
+        model_name=CAPTION_MODEL_NAME,
+        batch_size=CAPTION_BATCH_SIZE,
+        max_new_tokens=CAPTION_MAX_NEW_TOKENS,
+        num_beams=CAPTION_NUM_BEAMS,
+        show_progress=False,
+    )
     print("Running hybrid retrieval")
 
     run_hybrid_pipeline(
@@ -106,7 +121,11 @@ def main():
         image_index=image_index,
         image_encoder=image_encoder,
         image_alpha=IMAGE_ALPHA,
-        passages_df=df_passages
+        passages_df=df_passages,
+        captioner=captioner,
+        caption_gamma=HYBRID_GAMMA,
+        caption_top_k=CAPTION_TOP_K,
+        caption_append_to_query=CAPTION_APPEND_TO_QUERY
     )
 
     print(f"Output saved to: {OUTPUT_PATH}")
