@@ -33,7 +33,7 @@ BM25_TOP_K = 200
 DENSE_TOP_K = 100
 FINAL_TOP_K = 5
 TEXT_ALPHA = 0.6
-IMAGE_ALPHA = 0.3
+IMAGE_ALPHA = 0.1
 
 
 def load_mmdoc_data():
@@ -136,8 +136,8 @@ def main():
     bm25_index = build_bm25_index(df_passages)
     dense_retriever, dense_index = build_dense_index(df_passages)
 
-    # vlm = VLMRetriever()
-    vlm = None
+    vlm = VLMRetriever()
+    # vlm = None
 
     # image retrieval disabled
     image_encoder, image_index = None, None

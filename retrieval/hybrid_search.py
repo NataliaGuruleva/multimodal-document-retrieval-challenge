@@ -28,7 +28,7 @@ class HybridSearchEngine:
         alpha: float,
         bm25_top_k: int = 100,
         dense_top_k: int = 100,
-        vlm_top_k: int = 20,
+        vlm_top_k: int = 100,
         final_top_k: int = 5,
         image_index: Optional[ImageIndex] = None,  # unused for M2KR
         image_encoder: Optional[ImageEncoder] = None,
@@ -143,27 +143,22 @@ class HybridSearchEngine:
                 caption_hits = None
 
         if doc_name is not None and self.vlm_retriever is not None and self.passages_df is not None:
-            ids = [pid for pid, _ in dense_hits]
-            dense_top_ids = [pid for pid, _ in dense_hits[: self.vlm_top_k]]
-            texts = []
-            imgs = []
-
-            for pid in dense_top_ids:
-                row = self.passages_df[self.passages_df["passage_id"] == pid].iloc[0]
-                text = row.get("vlm_text") or row.get("ocr_text") or ""
-                img = DATA_DIR / "MMDocIR-Challenge" / row.get("image_path")
-                texts.append(text)
-                imgs.append(img)
+            doc_df = self.passages_df[self.passages_df["doc_name"] == doc_name]
+            if len(doc_df) > 0:
+                doc_pids = doc_df["passage_id"].astype(str).tolist()
+            doc_imgs = []
+            for p in doc_df.get("image_path", []).tolist():
+                if isinstance(p, str) and p.strip():
+                    doc_imgs.append("data/MMDocIR-Challenge/" + p)
+                else:
+                    doc_imgs.append(None)
 
             vlm_hits = self.vlm_retriever.retrieve(
                 query_text=query_text,
-                candidate_texts=texts,
-                candidate_image_paths=imgs,
-                candidate_ids=dense_top_ids,
-                top_k=self.final_top_k
+                image_paths=doc_imgs,
+                doc_page_ids=doc_pids,
+                top_k=self.vlm_top_k
             )
-
-            return [pid for pid, _ in vlm_hits]
         
         candidate_ids = sorted(candidate_set)
         image_hits = None
@@ -177,14 +172,20 @@ class HybridSearchEngine:
                 image_hits = list(zip(candidate_ids, scores.tolist()))
             except Exception as e:
                 image_hits = None
-
+        
+        final_image_scores = image_hits
+        final_beta = self.image_alpha if image_hits is not None else 0.0
+        if doc_name is not None and vlm_hits is not None and len(vlm_hits) > 0:
+            final_image_scores = vlm_hits
+            final_beta = self.image_alpha
+        
         final_hits = DenseRetriever.hybrid_top_k(
             bm25_scores=bm25_hits,
             dense_scores=dense_hits,
-            image_scores=image_hits,
+            image_scores=final_image_scores,
             caption_scores=caption_hits,
             alpha=self.alpha,
-            beta=self.image_alpha if image_hits is not None else 0.0,
+            beta=final_beta,
             gamma=self.caption_gamma if caption_hits is not None else 0.0,
             top_k=self.final_top_k,
             normalize=True,
