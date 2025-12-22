@@ -10,7 +10,7 @@ from retrieval.dense_retriever import DenseRetriever, DenseDocumentIndex
 from retrieval.image_retriever import ImageIndex, ImageEncoder
 from retrieval.captioner import ImageCaptioner
 from utils.text import build_query_text, tokenize, normalize_text
-from utils.image import load_image
+from utils.image import load_image, resolve_image_path
 from config import DATA_DIR
 
 
@@ -28,7 +28,7 @@ class HybridSearchEngine:
         alpha: float,
         bm25_top_k: int = 100,
         dense_top_k: int = 100,
-        vlm_top_k: int = 100,
+        vlm_top_k: int = 20,
         final_top_k: int = 5,
         image_index: Optional[ImageIndex] = None,  # unused for M2KR
         image_encoder: Optional[ImageEncoder] = None,
@@ -92,7 +92,8 @@ class HybridSearchEngine:
 
         if query_image_path and self.captioner is not None:
             try:
-                resolved_query_img = "M2KR-Challenge/passage_images/" + query_image_path
+                rp = resolve_image_path(query_image_path)
+                resolved_query_img = str(rp) if rp is not None else None
                 caption_text = self.captioner.caption_image(resolved_query_img, prompt=caption_prompt)
             except Exception:
                 caption_text = ""
@@ -120,11 +121,15 @@ class HybridSearchEngine:
             dense_hits = self.dense_index.retrieve(query_emb, top_k=self.dense_top_k)
             candidate_set.update([pid for pid, _ in dense_hits])
         else:
-            dense_hits = self.dense_index.retrieve_subset(
-                query_emb=query_emb,
-                candidate_ids=candidate_ids,
-                top_k=self.dense_top_k,
-            )
+            dense_pool_ids = candidate_ids
+            if self.passages_df is not None:
+                doc_df = self.passages_df[self.passages_df["doc_name"] == doc_name]
+                if len(doc_df) > 0:
+                    dense_pool_ids = doc_df["passage_id"].astype(str).tolist()
+
+            dense_hits = self.dense_index.retrieve_subset(query_emb=query_emb, candidate_ids=dense_pool_ids, top_k=self.dense_top_k)
+            candidate_set.update([pid for pid, _ in dense_hits])
+
         caption_hits = None
         if (not self.caption_append_to_query) and caption_text and self.caption_gamma > 0.0:
             try:
@@ -141,7 +146,7 @@ class HybridSearchEngine:
                     )
             except Exception:
                 caption_hits = None
-
+        vlm_hits = None
         if doc_name is not None and self.vlm_retriever is not None and self.passages_df is not None:
             doc_df = self.passages_df[self.passages_df["doc_name"] == doc_name]
             if len(doc_df) > 0:
@@ -149,22 +154,26 @@ class HybridSearchEngine:
             doc_imgs = []
             for p in doc_df.get("image_path", []).tolist():
                 if isinstance(p, str) and p.strip():
-                    doc_imgs.append("data/MMDocIR-Challenge/" + p)
+                    pp = Path(p)
+                    if pp.exists() or pp.is_absolute():
+                        rp = resolve_image_path(p)
+                        doc_imgs.append(str(rp) if rp is not None else None)
                 else:
                     doc_imgs.append(None)
-
+            
             vlm_hits = self.vlm_retriever.retrieve(
                 query_text=query_text,
                 image_paths=doc_imgs,
                 doc_page_ids=doc_pids,
                 top_k=self.vlm_top_k
             )
+            vlm_hits = [(pid, s) for pid, s in vlm_hits if pid in candidate_set]
         
         candidate_ids = sorted(candidate_set)
         image_hits = None
         if query_image_path and self._has_image_branch():
             try:
-                query_img_emb = self.image_encoder.encode_images(["M2KR-Challenge/passage_images/" + query_image_path])
+                query_img_emb = self.image_encoder.encode_images([query_image_path])
                 id_to_idx = {pid: i for i, pid in enumerate(self.dense_index.doc_ids)}
                 passage_texts = [self.pid2text.get(pid, "Empty.") for pid in candidate_ids]
                 passage_text_embs = self.image_encoder.encode_texts(passage_texts)

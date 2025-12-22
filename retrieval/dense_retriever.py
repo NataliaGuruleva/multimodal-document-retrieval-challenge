@@ -45,6 +45,7 @@ class DenseDocumentIndex:
         self.doc_ids = doc_ids
         self.embeddings = embeddings
         self.model_name = model_name
+        self.id2idx = {pid: i for i, pid in enumerate(self.doc_ids)}
     
     @property
     def dim(self) -> int:
@@ -70,12 +71,39 @@ class DenseDocumentIndex:
         idx = idx[np.argsort(-scores[idx])]
         return [(self.doc_ids[i], float(scores[i])) for i in idx.tolist()]
     
-    def retrieve_subset(self, query_emb: np.ndarray, candidate_ids: Iterable[str], top_k: int) -> List[Tuple[str, float]]:
-        """Retrieve only from a subset of document IDs."""
-        hits = self.retrieve(query_emb, top_k=len(candidate_ids))
-        cand = set(candidate_ids)
-        hits = [(pid, s) for pid, s in hits if pid in cand]
-        return hits[:top_k]
+    def retrieve_subset(self, query_emb: np.ndarray, candidate_ids: Iterable[str], top_k: int, device: str | torch.device = DEVICE) -> List[Tuple[str, float]]:
+        """
+        Retrieve only from a subset of document IDs (MDocIR retrieval).
+        """
+        pids = []
+        idxs = []
+        for pid in candidate_ids:
+            pid = str(pid)
+            j = self.id2idx.get(pid)
+            if j is not None:
+                pids.append(pid)
+                idxs.append(j)
+        if not idxs:
+            return []
+        
+        if query_emb.ndim == 1:
+            query_emb = query_emb[None, :]
+
+        q = torch.from_numpy(query_emb).to(device)
+        d = torch.from_numpy(self.embeddings[idxs]).to(device)
+        scores = torch.matmul(q, d.T).squeeze(0).cpu().numpy()
+        n = int(scores.shape[0])
+        k = min(int(top_k), n)
+        if k <= 0:
+            return []
+        if k == n:
+            order = np.argsort(-scores)
+        else:
+            order = np.argpartition(-scores, k - 1)[:k]
+            order = order[np.argsort(-scores[order])]
+
+        return [(pids[i], float(scores[i])) for i in order.tolist()]
+
     
     def save(self, path: str | Path) -> None:
         """Save index to NPZ and metadata files."""
@@ -183,7 +211,7 @@ class DenseRetriever:
             mn = float(vals.min())
             mx = float(vals.max())
             if mx - mn < 1e-12:
-                vals = np.ones_like(vals, dtype=np.float32)
+                vals = np.zeros_like(vals, dtype=np.float32)
             else:
                 vals = (vals - mn) / (mx - mn)
             return [(pid, float(v)) for (pid, _), v in zip(src, vals)]
@@ -198,7 +226,6 @@ class DenseRetriever:
             dense_scores_n = dense_scores
             image_scores_n = image_scores
             caption_scores_n = caption_scores
-
         w_bm25 = 1.0 - alpha - beta - gamma
         scores: Dict[str, float] = {}
 

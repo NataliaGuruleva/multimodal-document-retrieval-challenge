@@ -17,10 +17,10 @@ class ImageCaptioner:
 
     def __init__(
         self,
-        model_name: str = "Salesforce/blip-image-captioning-base",
+        model_name: str = "Salesforce/blip-image-captioning-large",
         batch_size: int = 8,
         device: Optional[str] = None,
-        max_new_tokens: int = 32,
+        max_new_tokens: int = 64,
         num_beams: int = 3,
         show_progress: bool = False,
     ):
