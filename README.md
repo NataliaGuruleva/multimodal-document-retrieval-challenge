@@ -84,4 +84,5 @@ python -m scripts.conversion
 ```
 Final file:
 - artifacts/submission/submission.csv
-
+Google Presentation:
+- https://docs.google.com/presentation/d/1rQvuF9ZcQYiKED54hpgfIk5xI8PNvE-B2Fjqt4FZs84/edit?usp=sharing
