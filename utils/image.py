@@ -11,6 +11,53 @@ try:
 except ImportError:
     DATA_DIR = None
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+def resolve_image_path(image_path: Optional[str]) -> Optional[Path]:
+    """
+    Robustly resolve image paths across:
+      - absolute paths
+      - paths relative to cwd / project root
+      - paths relative to DATA_DIR
+      - dataset subfolders (M2KR/MMDocIR/ViDoRe)
+      - duplicated prefixes (we fallback to basename search)
+    """
+    if not image_path or not isinstance(image_path, str):
+        return None
+
+    p = Path(image_path)
+    name = p.name
+
+    candidates: list[Path] = []
+
+    # as absolute or relative to current
+    candidates.append(p)
+    # relative to project root
+    candidates.append(PROJECT_ROOT / p)
+
+    if DATA_DIR is not None:
+        # relative to data/
+        candidates.append(DATA_DIR / p)
+
+        # common dataset roots
+        for root in ["M2KR-Challenge", "MMDocIR-Challenge/page_images", "ViDoRe-DocVQA", "M2KR-HF-local"]:
+            candidates.append(DATA_DIR / root / p)
+
+        # common image folders
+        for folder in [
+            "M2KR-Challenge/passage_images",
+            "MMDocIR-Challenge/page_images",
+            "ViDoRe-DocVQA/page_images",
+        ]:
+            candidates.append(DATA_DIR / folder / name)
+
+    for c in candidates:
+        try:
+            if c.exists():
+                return c
+        except Exception:
+            continue
+    return None
 
 def load_image(image_path: Optional[str] = None) -> Optional[Image.Image]:
     """
@@ -20,21 +67,10 @@ def load_image(image_path: Optional[str] = None) -> Optional[Image.Image]:
         return None
     
     try:
-        # Try absolute path
-        p = Path(image_path)
-        if p.is_absolute() and p.exists():
-            return Image.open(p).convert("RGB")
-        
-        # Try relative to DATA_DIR
-        if DATA_DIR is not None:
-            candidate = DATA_DIR / image_path
-            if candidate.exists():
-                return Image.open(candidate).convert("RGB")
-        
-        # Try as-is
-        if p.exists():
-            return Image.open(p).convert("RGB")     
-        return None
+        rp = resolve_image_path(image_path)
+        if rp is None:
+            return None
+        return Image.open(rp).convert("RGB")
     
     except Exception:
         return None

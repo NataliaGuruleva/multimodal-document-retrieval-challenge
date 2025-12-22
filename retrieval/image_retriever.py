@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch import nn
-from transformers import AutoImageProcessor, AutoModel
+from transformers import AutoImageProcessor, AutoModel, AutoTokenizer
 from pathlib import Path
 from tqdm.auto import tqdm
 from typing import Dict, List, Optional, Tuple
@@ -18,11 +18,20 @@ class ImageEncoder:
         self.batch_size = batch_size
         
         self.processor = AutoImageProcessor.from_pretrained(model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModel.from_pretrained(model_name)
         self.model.to(self.device).eval()
         
         for p in self.model.parameters():
             p.requires_grad_(False)
+
+    @torch.no_grad()
+    def encode_texts(self, texts: List[str]) -> torch.Tensor:
+        inputs = self.tokenizer(texts, return_tensors="pt", padding=True, truncation=True).to(self.device)
+        text_outputs = self.model.get_text_features(**inputs)
+        embs = F.normalize(text_outputs, dim=-1)
+        
+        return embs.cpu()
     
     @torch.no_grad()
     def encode_images(self, paths: List[Optional[str]]) -> torch.Tensor:
@@ -60,28 +69,17 @@ class ImageEncoder:
                 continue
             
             inputs = self.processor(images=images, return_tensors="pt").to(self.device)
-            outputs = self.model(**inputs)
+            outputs = self.model.get_image_features(**inputs)
+            embs = F.normalize(outputs, dim=-1)
             
-            # Get embeddings
-            if hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
-                embs = outputs.pooler_output
-            else:
-                embs = outputs.last_hidden_state.mean(dim=1)
-            
-            embs = F.normalize(embs, dim=-1)
-            if emb_dim is None:
-                emb_dim = int(embs.size(-1))
-
-                if all_embs and all_embs[0].size(-1) == 1:
-                    all_embs = [torch.zeros(t.size(0), emb_dim) for t in all_embs]
-            batch_embs = torch.zeros(len(batch_paths), emb_dim)
+            batch_embs = torch.zeros(len(batch_paths), embs.size(-1))
             for idx, emb in zip(valid_indices, embs.cpu()):
                 batch_embs[idx] = emb
             
             all_embs.append(batch_embs)
+        
         embeddings = torch.cat(all_embs, dim=0)
         assert embeddings.size(0) == n
-        
         return embeddings
 
 

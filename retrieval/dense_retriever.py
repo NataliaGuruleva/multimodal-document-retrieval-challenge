@@ -15,14 +15,16 @@ try:
         DENSE_POOLING,
         HYBRID_ALPHA,
         HYBRID_BETA,
+        HYBRID_GAMMA,
     )
 except ImportError:
     DENSE_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
     EMB_BATCH_SIZE = 64
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     DENSE_POOLING = "mean"
-    HYBRID_ALPHA = 0.6 # dense-text
-    HYBRID_BETA = 0.0 # image
+    HYBRID_ALPHA = 0.1 # dense-text
+    HYBRID_BETA = 0.3 # image
+    HYBRID_GAMMA = 0.3
 
 
 # sentence-transformers lazy load
@@ -43,6 +45,7 @@ class DenseDocumentIndex:
         self.doc_ids = doc_ids
         self.embeddings = embeddings
         self.model_name = model_name
+        self.id2idx = {pid: i for i, pid in enumerate(self.doc_ids)}
     
     @property
     def dim(self) -> int:
@@ -68,12 +71,39 @@ class DenseDocumentIndex:
         idx = idx[np.argsort(-scores[idx])]
         return [(self.doc_ids[i], float(scores[i])) for i in idx.tolist()]
     
-    def retrieve_subset(self, query_emb: np.ndarray, candidate_ids: Iterable[str], top_k: int) -> List[Tuple[str, float]]:
-        """Retrieve only from a subset of document IDs."""
-        hits = self.retrieve(query_emb, top_k=len(candidate_ids))
-        cand = set(candidate_ids)
-        hits = [(pid, s) for pid, s in hits if pid in cand]
-        return hits[:top_k]
+    def retrieve_subset(self, query_emb: np.ndarray, candidate_ids: Iterable[str], top_k: int, device: str | torch.device = DEVICE) -> List[Tuple[str, float]]:
+        """
+        Retrieve only from a subset of document IDs (MDocIR retrieval).
+        """
+        pids = []
+        idxs = []
+        for pid in candidate_ids:
+            pid = str(pid)
+            j = self.id2idx.get(pid)
+            if j is not None:
+                pids.append(pid)
+                idxs.append(j)
+        if not idxs:
+            return []
+        
+        if query_emb.ndim == 1:
+            query_emb = query_emb[None, :]
+
+        q = torch.from_numpy(query_emb).to(device)
+        d = torch.from_numpy(self.embeddings[idxs]).to(device)
+        scores = torch.matmul(q, d.T).squeeze(0).cpu().numpy()
+        n = int(scores.shape[0])
+        k = min(int(top_k), n)
+        if k <= 0:
+            return []
+        if k == n:
+            order = np.argsort(-scores)
+        else:
+            order = np.argpartition(-scores, k - 1)[:k]
+            order = order[np.argsort(-scores[order])]
+
+        return [(pids[i], float(scores[i])) for i in order.tolist()]
+
     
     def save(self, path: str | Path) -> None:
         """Save index to NPZ and metadata files."""
@@ -154,34 +184,62 @@ class DenseRetriever:
         bm25_scores: List[Tuple[str, float]],
         dense_scores: List[Tuple[str, float]],
         image_scores: Optional[List[Tuple[str, float]]] = None,
+        caption_scores: Optional[List[Tuple[str, float]]] = None,
         alpha: float = HYBRID_ALPHA,
         beta: float = HYBRID_BETA,
-        top_k: int = 100,
+        gamma: float = HYBRID_GAMMA,
+        top_k: int = 5,
+        normalize: bool = True,
     ) -> List[Tuple[str, float]]:
         """
         Late fusion:
-            score = (1 - alpha - beta) * bm25
-                  + alpha * dense_text
-                  + beta  * image
-        
-        Все скоры предполагаются нормированными или соизмеримыми.
+            score = w_bm25   * bm25
+                  + alpha    * dense_text
+                  + beta     * image
+                  + gamma    * caption_dense
+            w_bm25 = 1 - alpha - beta - gamma
         """
         assert 0.0 <= alpha <= 1.0
         assert 0.0 <= beta <= 1.0
-        assert alpha + beta <= 1.0
-        
+        assert 0.0 <= gamma <= 1.0
+        assert alpha + beta + gamma <= 1.0
+
+        def minmax(src: Optional[List[Tuple[str, float]]]) -> Optional[List[Tuple[str, float]]]:
+            if not src:
+                return src
+            vals = np.array([float(s) for _, s in src], dtype=np.float32)
+            mn = float(vals.min())
+            mx = float(vals.max())
+            if mx - mn < 1e-12:
+                vals = np.zeros_like(vals, dtype=np.float32)
+            else:
+                vals = (vals - mn) / (mx - mn)
+            return [(pid, float(v)) for (pid, _), v in zip(src, vals)]
+
+        if normalize:
+            bm25_scores_n = minmax(bm25_scores)
+            dense_scores_n = minmax(dense_scores)
+            image_scores_n = minmax(image_scores) if image_scores is not None else None
+            caption_scores_n = minmax(caption_scores) if caption_scores is not None else None
+        else:
+            bm25_scores_n = bm25_scores
+            dense_scores_n = dense_scores
+            image_scores_n = image_scores
+            caption_scores_n = caption_scores
+        w_bm25 = 1.0 - alpha - beta - gamma
         scores: Dict[str, float] = {}
-        
+
         def add(src: Optional[List[Tuple[str, float]]], weight: float):
             if not src or weight == 0.0:
                 return
             for pid, s in src:
-                scores[pid] = scores.get(pid, 0.0) + weight * s
-        
-        add(bm25_scores, 1.0 - alpha - beta)
-        add(dense_scores, alpha)
-        add(image_scores, beta)
-        
+                scores[pid] = scores.get(pid, 0.0) + weight * float(s)
+
+        add(bm25_scores_n, w_bm25)
+        add(dense_scores_n, alpha)
+        add(image_scores_n, beta)
+        add(caption_scores_n, gamma)
+
         ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
         return ranked[:top_k]
 

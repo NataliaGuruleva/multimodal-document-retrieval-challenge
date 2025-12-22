@@ -12,7 +12,7 @@ SUBMISSION_DIR = ARTIFACTS_DIR / "submission"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BM25_K1 = 1.5
 BM25_B = 0.75
-DENSE_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+DENSE_MODEL_NAME = "BAAI/bge-large-en-v1.5"
 EMB_BATCH_SIZE = 64
 DENSE_POOLING = "mean" # future extensions
 IMAGE_MODEL_NAME = "openai/clip-vit-base-patch32"
@@ -25,6 +25,19 @@ HYBRID_BETA = 0.3        # weight of image branch
 BM25_TOP_K = 200
 DENSE_TOP_K = 100
 FINAL_TOP_K = 5
+
+# Captioning (M2KR query images)
+CAPTION_MODEL_NAME = "Salesforce/blip-image-captioning-large"
+CAPTION_BATCH_SIZE = 8
+CAPTION_MAX_NEW_TOKENS = 32
+CAPTION_NUM_BEAMS = 3
+
+# If True, caption text is appended to query_text for BM25 + dense
+CAPTION_APPEND_TO_QUERY = True
+
+# Text fusion: BM25 + Dense + CaptionDense + Image
+HYBRID_GAMMA = 0.0       # weight of caption-dense branch
+CAPTION_TOP_K = 100
 
 SEED = 42
 torch.manual_seed(SEED)
